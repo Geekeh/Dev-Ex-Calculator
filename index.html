@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DevEx Calculator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+
+        body {
+            overflow: hidden;
+        }
+
+        :root{
+            --bg:#0b0f14; --panel:#0f131a; --fg:#eaeef3; --muted:#8c94a1;
+            --robux:#FFCC00; --usd:#4DFF54;
+            --lane-w:min(95vw, 900px);
+            --fs-max:120px;   /* starting font size for big numbers */
+            --fs-min:34px;    /* minimum when auto-shrinking */
+        }
+
+        *{box-sizing:border-box}
+        html,body{height:100%;margin:0}
+        body{
+            background: radial-gradient(1300px 700px at 50% 15%, #111827 0%, #0b0f14 60%, #070a0f 100%);
+            color:var(--fg); font-family: Fredoka, system-ui, Arial, sans-serif;
+            display:flex; flex-direction:column;
+        }
+
+        header{ text-align:center; padding:2rem 1rem .5rem; }
+        header h1{ margin:0; font-size:clamp(36px,6vw,80px); }
+        header p{ margin:.35rem 0 0; color:var(--muted); }
+
+        .grid{
+            flex:1; display:grid; grid-template-columns:1fr 80px 1fr; place-items:center;
+            gap:3rem; padding:2rem 1rem;
+        }
+
+        .col{ width:var(--lane-w); text-align:center; }
+        .label{ font-weight:700; letter-spacing:.06em; margin-bottom:.5rem; font-size:1.25rem; }
+        .label.robux{ color:var(--robux) } .label.usd{ color:var(--usd) }
+
+        .row{
+            width:100%;
+            display:flex;
+            align-items:baseline;           /* aligns $ with digits */
+            justify-content:center;
+            gap:.5rem;
+        }
+
+        .big{
+            font-size:var(--fs-max);
+            line-height:1;
+            font-weight:700;
+            font-variant-numeric: tabular-nums;
+            white-space:nowrap;
+        }
+
+        /* visual $ sign (not part of the input value) */
+        .usd-sign{
+            color:var(--fg);
+        }
+
+        .number{
+            flex:1;
+            min-width:0;                    /* allow shrinking in flex row */
+            background:none; border:none; outline:none;
+            color:var(--fg); font:inherit;
+            font-size:var(--fs-max); line-height:1;
+            text-align:center; caret-color:var(--fg);
+            font-variant-numeric: tabular-nums;
+            white-space:nowrap;             /* keep on one line; we will shrink font instead */
+        }
+        .number::placeholder{ color:#7f8795; opacity:1 }
+
+        .eq{ font-size:clamp(36px,5vw,64px); color:#c9d1e1; opacity:.7; user-select:none; }
+        .hint{ margin-top:1rem; font-size:.9rem; letter-spacing:.12em; color:var(--muted); }
+        .btn{ margin-top:1rem; border:none; background:var(--panel); color:#fff; padding:.7rem 1.3rem;
+            border-radius:999px; box-shadow:0 0 0 1px #202734 inset; cursor:pointer; font-size:.95rem; }
+        .btn:active{ transform:translateY(1px) }
+
+        footer{ text-align:center; padding:1rem; color:var(--muted); font-size:.9rem; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>DevEx Calculator</h1>
+    <p>Instantly convert Robux to Currency</p>
+</header>
+
+<section class="grid">
+    <!-- Left: ROBUX -->
+    <div class="col" id="robuxCol">
+        <div class="label robux">ROBUX</div>
+        <div class="row">
+            <input id="robux" class="number" type="text" inputmode="numeric" placeholder="0" aria-label="Enter Robux amount">
+        </div>
+        <div class="hint">ENTER ROBUX AMOUNT</div>
+        <button class="btn" id="copyRobux">Copy</button>
+    </div>
+
+    <div class="eq">=</div>
+
+    <!-- Right: USD -->
+    <div class="col" id="usdCol">
+        <div class="label usd">USD</div>
+        <div class="row">
+<!--            <span class="big usd-sign" id="usdSign">$</span>-->
+            <input id="usd" class="number" type="text" inputmode="decimal" placeholder="$0.00" aria-label="Enter USD amount">
+        </div>
+        <div class="hint">ENTER USD AMOUNT</div>
+        <button class="btn" id="copyUsd">Copy</button>
+    </div>
+</section>
+
+<footer>Remake of devexconverter.com by geek</footer>
+
+<!-- hidden measurer for auto-shrink -->
+<span id="measure" style="position:absolute;left:-9999px;top:-9999px;visibility:hidden;white-space:pre;"></span>
+
+<script>
+    // ===== Config =====
+    const RATE_USD_PER_ROBUX = 0.0038; // $ per Robux (0.38¢)
+
+    // ===== Elements =====
+    const elRobux = document.getElementById('robux');
+    const elUsd   = document.getElementById('usd');
+    const usdSign = document.getElementById('usdSign');
+    const btnR    = document.getElementById('copyRobux');
+    const btnU    = document.getElementById('copyUsd');
+    const meas    = document.getElementById('measure');
+
+    // ===== Formatting utils =====
+    const onlyDigits = s => s.replace(/[^\d]/g, '');
+    const keepOneDot = s => s.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+
+    const fmtCommasInt = n => n.toLocaleString('en-US'); // 1234567 -> "1,234,567"
+    function formatUsdLive(str){
+        const clean = keepOneDot(str);
+        if (!clean) return '';
+        const endsWithDot = clean.endsWith('.');
+        const [intPart, decPartRaw] = clean.split('.');
+        const withCommas = intPart ? fmtCommasInt(Number(intPart)) : '';
+        if (endsWithDot) return withCommas + '.';
+        return decPartRaw !== undefined ? `${withCommas}.${decPartRaw}` : withCommas;
+    }
+
+    const fmtUSD2 = n => n.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+    const robuxToUsd = r => Math.round(r * RATE_USD_PER_ROBUX * 100) / 100;
+    const usdToRobux = u => Math.round(u / RATE_USD_PER_ROBUX);
+
+    // ===== Caret restore (counts digits; ignores commas/$) =====
+    function setCaretByDigitCount(input, formatted, digitsLeft){
+        let pos = 0, count = 0;
+        while (pos < formatted.length && count < digitsLeft){
+            if (/\d/.test(formatted[pos])) count++;
+            pos++;
+        }
+        input.setSelectionRange(pos, pos);
+    }
+
+    // ===== Auto-shrink font so content fits the row =====
+    function fitRow(rowEl, prefixText, inputEl){
+        const rowWidth = rowEl.clientWidth - 6; // small buffer
+        const style = getComputedStyle(inputEl);
+        const fontFamily = style.fontFamily;
+        const fontWeight = style.fontWeight;
+        const letterSpacing = style.letterSpacing;
+
+        const fsMax = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs-max')) || 120;
+        const fsMin = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs-min')) || 34;
+
+        const text = (prefixText || '') + (inputEl.value || inputEl.placeholder || '');
+        // binary search for the largest font-size that fits
+        let lo = fsMin, hi = fsMax, ans = fsMin;
+        for (let i = 0; i < 12; i++){
+            const mid = (lo + hi) / 2;
+            meas.style.fontFamily = fontFamily;
+            meas.style.fontWeight = fontWeight;
+            meas.style.letterSpacing = letterSpacing;
+            meas.style.fontSize = mid + 'px';
+            meas.textContent = text;
+            const w = meas.offsetWidth;
+            if (w <= rowWidth){ ans = mid; lo = mid; } else { hi = mid; }
+        }
+        inputEl.style.fontSize = ans + 'px';
+        if (prefixText) usdSign.style.fontSize = ans + 'px';
+    }
+
+    function fitAll(){
+        fitRow(document.querySelector('#robuxCol .row'), '', elRobux);
+        fitRow(document.querySelector('#usdCol .row'), '$', elUsd);
+    }
+
+    let syncing = false;
+
+    // ===== ROBUX (live commas) =====
+    elRobux.addEventListener('input', () => {
+        if (syncing) return;
+        syncing = true;
+
+        const caret = elRobux.selectionStart || 0;
+        const digitsLeft = (elRobux.value.slice(0, caret).match(/\d/g) || []).length;
+
+        const rawDigits = onlyDigits(elRobux.value);
+        const formatted = rawDigits ? fmtCommasInt(Number(rawDigits)) : '';
+        elRobux.value = formatted;
+        setCaretByDigitCount(elRobux, formatted, digitsLeft);
+
+        // Mirror to USD (live, no forced .00)
+        const robux = Number(rawDigits || 0);
+        const usdStr = rawDigits ? String(robuxToUsd(robux)) : '';
+        elUsd.value = formatUsdLive(usdStr);
+
+        syncing = false;
+        fitAll();
+    });
+
+    // ===== USD (live commas + decimals; $ is visual span) =====
+    elUsd.addEventListener('input', () => {
+        if (syncing) return;
+        syncing = true;
+
+        const caret = elUsd.selectionStart || 0;
+        const digitsLeft = (elUsd.value.slice(0, caret).match(/\d/g) || []).length;
+
+        const formatted = formatUsdLive(elUsd.value);
+        elUsd.value = formatted;
+        setCaretByDigitCount(elUsd, formatted, digitsLeft);
+
+        // Mirror to ROBUX (with commas)
+        const numericUsd = Number(keepOneDot(formatted)) || 0;
+        const robux = usdToRobux(numericUsd);
+        elRobux.value = numericUsd ? fmtCommasInt(robux) : '';
+
+        syncing = false;
+        fitAll();
+    });
+
+    // USD: pretty 2 decimals on blur
+    elUsd.addEventListener('blur', () => {
+        const num = Number(keepOneDot(elUsd.value)) || 0;
+        elUsd.value = num ? fmtUSD2(num) : '';
+        fitAll();
+    });
+
+    // Initial fit + resize fit
+    window.addEventListener('load', fitAll);
+    window.addEventListener('resize', fitAll);
+
+    // ===== Copy buttons (no $; Robux without commas) =====
+    btnR.addEventListener('click', async () => {
+        const value = onlyDigits(elRobux.value) || '0';
+        await navigator.clipboard.writeText(value);
+        btnR.textContent = 'Copied!';
+        setTimeout(()=>btnR.textContent='Copy', 900);
+    });
+
+    btnU.addEventListener('click', async () => {
+        // strip $ (it’s a separate span anyway), commas are not in the input here
+        const value = (keepOneDot(elUsd.value) || '0');
+        await navigator.clipboard.writeText(value);
+        btnU.textContent = 'Copied!';
+        setTimeout(()=>btnU.textContent='Copy', 900);
+    });
+</script>
+</body>
+</html>
