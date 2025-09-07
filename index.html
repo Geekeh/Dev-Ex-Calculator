@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DevEx Calculator</title>
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="favicon.png">
     <style>
 
         body {
@@ -32,8 +33,14 @@
         header p{ margin:.35rem 0 0; color:var(--muted); }
 
         .grid{
-            flex:1; display:grid; grid-template-columns:1fr 80px 1fr; place-items:center;
-            gap:3rem; padding:2rem 1rem;
+            flex:1;
+            display:grid;
+            /* was: grid-template-columns: 1fr 80px 1fr; */
+            grid-template-columns: minmax(0, var(--lane-w)) 80px minmax(0, var(--lane-w));
+            justify-content:center;   /* centers the 3 fixed columns as a block */
+            place-items:center;
+            gap:3rem;
+            padding:2rem 1rem;
         }
 
         .col{ width:var(--lane-w); text-align:center; }
